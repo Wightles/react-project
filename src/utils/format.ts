@@ -1,4 +1,5 @@
-export function formatPhone(phone: string) {
+export function formatRecipient(phone: string) {
+  if (phone.startsWith('@')) return phone
   if (phone.length === 11 && phone.startsWith('7')) {
     return `+7 ${phone.slice(1, 4)} ${phone.slice(4, 7)}-${phone.slice(7, 9)}-${phone.slice(9)}`
   }
@@ -8,6 +9,16 @@ export function formatPhone(phone: string) {
 export function normalizePhone(value: string) {
   const digits = value.replace(/\D/g, '')
   return digits.length === 11 && digits.startsWith('8') ? `7${digits.slice(1)}` : digits
+}
+
+export function normalizeRecipient(value: string): string | null {
+  const trimmed = value.trim()
+  if (trimmed.startsWith('@')) {
+    return /^@[a-zA-Z][a-zA-Z0-9_]{0,31}$/.test(trimmed) ? trimmed.toLowerCase() : null
+  }
+  if (!/^\+?[\d\s()-]+$/.test(trimmed)) return null
+  const phone = normalizePhone(trimmed)
+  return /^[1-9]\d{6,14}$/.test(phone) ? phone : null
 }
 
 export function formatTime(value: string) {

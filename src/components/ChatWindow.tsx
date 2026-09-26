@@ -1,46 +1,98 @@
 import { Fragment, useEffect, useRef } from 'react'
+import { MESSAGE_MAX_LENGTH } from '../constants'
 import type { Chat } from '../types'
-import { formatDay, formatPhone, formatTime } from '../utils/format'
+import { formatDay, formatRecipient, formatTime } from '../utils/format'
 import { Avatar, Icon } from './Icon'
 
 interface Props {
   chat: Chat | undefined
+  connected: boolean
   draft: string
+  sending: boolean
+  sendBusy: boolean
+  error: string
   onDraft: (text: string) => void
   onSend: () => void
   onBack: () => void
 }
 
-export function ChatWindow({ chat, draft, onDraft, onSend, onBack }: Props) {
+export function ChatWindow({ chat, connected, draft, sending, sendBusy, error, onDraft, onSend, onBack }: Props) {
   const endRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [chat?.id, chat?.messages.length])
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const wasSending = useRef(false)
 
-  if (!chat) return <section className="conversation conversation--empty"><Icon name="chat" /><h2>Выберите чат</h2><p>Или создайте новый, чтобы начать переписку.</p></section>
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' })
+  }, [chat?.id, chat?.messages.length])
 
-  return <section className="conversation" aria-label={`Переписка с ${formatPhone(chat.phone)}`}>
-    <header className="conversation__header">
-      <button type="button" className="icon-button mobile-back" onClick={onBack} aria-label="Назад к чатам"><Icon name="back" /></button>
-      <Avatar /><div><h2>{formatPhone(chat.phone)}</h2><p>Демонстрационная переписка</p></div>
-    </header>
-    <div className="messages" role="log" aria-label="Сообщения" aria-live="polite" aria-relevant="additions">
-      {chat.messages.length === 0 && <div className="empty-messages"><Icon name="chat" /><h3>Начните разговор</h3><p>Напишите первое сообщение.</p></div>}
-      {chat.messages.map((message, index) => {
-        const previous = chat.messages[index - 1]
-        const startsDay = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString()
-        return <Fragment key={message.id}>
-          {startsDay && <div className="day-divider"><span>{formatDay(message.createdAt)}</span></div>}
-          <div className={`message-row message-row--${message.direction}`}>
-            <div className="message"><span className="sr-only">{message.direction === 'outgoing' ? 'Вы: ' : 'Собеседник: '}</span><span className="message__text">{message.text}</span><time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time></div>
-          </div>
-        </Fragment>
-      })}
-      <div ref={endRef} />
-    </div>
-    <form className="composer" onSubmit={event => { event.preventDefault(); onSend() }}>
-      <div className="composer__input"><textarea aria-label="Сообщение" placeholder="Введите сообщение" rows={1} maxLength={4000} value={draft} onChange={event => onDraft(event.target.value)} onKeyDown={event => {
-        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); onSend() }
-      }} /><span className="composer__hint">Enter – отправить · Shift + Enter – новая строка</span></div>
-      <button className="send-button" type="submit" aria-label="Отправить сообщение" disabled={!draft.trim()} title="Добавить сообщение в демо-чат"><Icon name="send" /></button>
-    </form>
-  </section>
+  useEffect(() => {
+    if (wasSending.current && !sending && !sendBusy) inputRef.current?.focus()
+    wasSending.current = sending
+  }, [sending, sendBusy])
+
+  if (!chat) {
+    return (
+      <section className="conversation conversation--empty">
+        <Icon name="chat" />
+        <h2>{connected ? 'Начните переписку' : 'Подключите Telegram'}</h2>
+        <p>{connected ? 'Нажмите «Новый чат» и введите номер или @username получателя.' : 'Введите данные инстанса GREEN-API в форме подключения.'}</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="conversation" aria-label={`Переписка с ${formatRecipient(chat.recipient)}`}>
+      <header className="conversation__header">
+        <button type="button" className="icon-button mobile-back" onClick={onBack} aria-label="Назад к чатам">
+          <Icon name="back" />
+        </button>
+        <Avatar />
+        <div><h2>{formatRecipient(chat.recipient)}</h2><p>Telegram</p></div>
+      </header>
+      <div className="messages" role="log" aria-label="Сообщения" aria-live="polite" aria-relevant="additions">
+        {chat.messages.length === 0 && (
+          <div className="empty-messages"><Icon name="chat" /><h3>Начните разговор</h3><p>Напишите первое сообщение.</p></div>
+        )}
+        {chat.messages.map((message, index) => {
+          const previous = chat.messages[index - 1]
+          const startsDay = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString()
+          return (
+            <Fragment key={message.id}>
+              {startsDay && <div className="day-divider"><span>{formatDay(message.createdAt)}</span></div>}
+              <div className={`message-row message-row--${message.direction}`}>
+                <div className="message">
+                  <span className="sr-only">{message.direction === 'outgoing' ? 'Вы: ' : 'Собеседник: '}</span>
+                  <span className="message__text">{message.text}</span>
+                  <span className="message__meta">
+                    {message.status === 'queued' && <span title="GREEN-API принял сообщение в очередь. Доставка ещё не подтверждена.">В очереди</span>}
+                    <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
+                  </span>
+                </div>
+              </div>
+            </Fragment>
+          )
+        })}
+        <div ref={endRef} />
+      </div>
+      {error && <p className="send-error" role="alert">{error} Текст сохранён в поле ввода.</p>}
+      <form className="composer" aria-busy={sending} onSubmit={event => { event.preventDefault(); onSend() }}>
+        <div className="composer__input">
+          <textarea ref={inputRef} aria-label="Сообщение" placeholder="Введите сообщение" rows={1} maxLength={MESSAGE_MAX_LENGTH}
+            value={draft} readOnly={sending} onChange={event => onDraft(event.target.value)} onKeyDown={event => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                onSend()
+              }
+            }} />
+          <span className="composer__hint" role="status">
+            {sending ? 'Отправка…' : 'Enter – отправить · Shift + Enter – новая строка'}
+          </span>
+        </div>
+        <button className="send-button" type="submit" aria-label="Отправить сообщение"
+          disabled={!draft.trim() || sendBusy} title={sending ? 'Отправка…' : 'Отправить сообщение в Telegram'}>
+          {sending ? <span className="spinner" aria-hidden="true" /> : <Icon name="send" />}
+        </button>
+      </form>
+    </section>
+  )
 }

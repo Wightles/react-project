@@ -3,11 +3,12 @@ export interface Message {
   text: string
   direction: 'incoming' | 'outgoing'
   createdAt: string
+  status?: 'queued'
 }
 
 export interface Chat {
   id: string
-  phone: string
+  recipient: string
   messages: Message[]
 }
 

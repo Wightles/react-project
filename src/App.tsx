@@ -1,24 +1,28 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { checkConnection, errorMessage, GreenApiError, resolveChat, sendText } from './api/greenApi'
 import { ChatList } from './components/ChatList'
 import { ChatWindow } from './components/ChatWindow'
 import { Icon } from './components/Icon'
 import { SidebarForm } from './components/SidebarForm'
-import { createDemoChats } from './data/demoChats'
-import type { ConnectionSettings } from './types'
+import type { Chat, ConnectionSettings, Message } from './types'
 import './App.css'
 
 function App() {
-  const [chats, setChats] = useState(createDemoChats)
-  const [activeId, setActiveId] = useState<string | null>('79991234567')
+  const [chats, setChats] = useState<Chat[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [panel, setPanel] = useState<'connection' | 'chat' | null>('connection')
   const [settings, setSettings] = useState<ConnectionSettings | null>(null)
-  const [notice, setNotice] = useState('')
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({})
+  const [sendingId, setSendingId] = useState<string | null>(null)
   const [mobileChat, setMobileChat] = useState(false)
   const newChatRef = useRef<HTMLButtonElement>(null)
   const settingsRef = useRef<HTMLButtonElement>(null)
+  const sendControllerRef = useRef<AbortController | null>(null)
   const activeChat = chats.find(chat => chat.id === activeId)
+
+  useEffect(() => () => sendControllerRef.current?.abort(), [])
 
   function closePanel() {
     setPanel(null)
@@ -26,35 +30,114 @@ function App() {
     else settingsRef.current?.focus()
   }
 
-  function createChat(phone: string) {
-    setChats(current => current.some(chat => chat.id === phone) ? current : [{ id: phone, phone, messages: [] }, ...current])
-    setActiveId(phone)
+  async function connect(values: ConnectionSettings, signal: AbortSignal) {
+    await checkConnection(values, signal)
+    if (signal.aborted) return
+    setSettings(values)
+    setPanel('chat')
+  }
+
+  function disconnect() {
+    if (sendControllerRef.current) return
+    setSettings(null)
+    setChats([])
+    setDrafts({})
+    setSendErrors({})
+    setSearch('')
+    setActiveId(null)
+    setMobileChat(false)
+    setPanel('connection')
+  }
+
+  async function createChat(recipient: string, signal: AbortSignal) {
+    if (!settings) return
+    const existing = chats.find(chat => chat.recipient === recipient)
+    const id = existing?.id ?? await resolveChat(settings, recipient, signal)
+    if (signal.aborted) return
+    setChats(current => current.some(chat => chat.id === id)
+      ? current
+      : [{ id, recipient, messages: [] }, ...current])
+    setActiveId(id)
     setSearch('')
     closePanel()
     setMobileChat(true)
   }
 
-  function sendMessage() {
-    if (!activeId) return
-    const text = (drafts[activeId] ?? '').trim()
+  async function sendMessage() {
+    if (!settings || !activeChat || sendControllerRef.current) return
+    const chatId = activeChat.id
+    const draft = drafts[chatId] ?? ''
+    const text = draft.trim()
     if (!text) return
-    const message = { id: crypto.randomUUID(), text, direction: 'outgoing' as const, createdAt: new Date().toISOString() }
-    setChats(current => current.map(chat => chat.id === activeId ? { ...chat, messages: [...chat.messages, message] } : chat))
-    setDrafts(current => ({ ...current, [activeId]: '' }))
+
+    const controller = new AbortController()
+    sendControllerRef.current = controller
+    setSendingId(chatId)
+    setSendErrors(current => ({ ...current, [chatId]: '' }))
+
+    try {
+      const id = await sendText(settings, chatId, text, controller.signal)
+      if (controller.signal.aborted) return
+      const message: Message = {
+        id, text, direction: 'outgoing', createdAt: new Date().toISOString(), status: 'queued',
+      }
+      setChats(current => current.map(chat => chat.id === chatId
+        ? { ...chat, messages: [...chat.messages, message] }
+        : chat))
+      setDrafts(current => current[chatId] === draft ? { ...current, [chatId]: '' } : current)
+    } catch (error) {
+      if (controller.signal.aborted) return
+      const detail = errorMessage(error)
+      const message = error instanceof GreenApiError && error.uncertain
+        ? `${detail} Отправка могла состояться. Проверьте Telegram перед повторной попыткой.`
+        : detail
+      setSendErrors(current => ({ ...current, [chatId]: message }))
+    } finally {
+      if (sendControllerRef.current === controller) {
+        sendControllerRef.current = null
+        if (!controller.signal.aborted) setSendingId(null)
+      }
+    }
   }
 
-  return <main className={`app ${mobileChat ? 'app--chat-open' : ''}`}>
-    <div className="demo-banner"><span className="demo-badge">Демо</span><span>Сообщения видны только здесь и не отправляются в MAX.</span></div>
-    <div className="chat-layout">
-      <aside className="sidebar" aria-label="Чаты и подключение">
-        <header className="sidebar__header"><h1>Чаты</h1><div className="sidebar__actions"><button ref={newChatRef} type="button" className="primary-button" onClick={() => { setPanel('chat'); setNotice('') }}><Icon name="plus" />Новый чат</button><button ref={settingsRef} type="button" className={`icon-button settings-button ${panel === 'connection' ? 'is-active' : ''}`} aria-label="Настройки подключения" aria-expanded={panel === 'connection'} onClick={() => { setPanel(panel === 'connection' ? null : 'connection'); setNotice('') }}><Icon name="settings" /></button></div></header>
-        <ChatList chats={chats} activeId={activeId} search={search} onSearch={setSearch} onSelect={id => { setActiveId(id); setMobileChat(true) }} />
-        {notice && <p className="sidebar-notice" role="status">{notice}</p>}
-        {panel && <SidebarForm key={panel} mode={panel} settings={settings} onClose={closePanel} onCreate={createChat} onSave={values => { setSettings(values); closePanel(); setNotice('Данные сохранены в памяти вкладки. API пока не подключён.') }} />}
-      </aside>
-      <ChatWindow chat={activeChat} draft={activeId ? drafts[activeId] ?? '' : ''} onDraft={text => { if (activeId) setDrafts(current => ({ ...current, [activeId]: text })) }} onSend={sendMessage} onBack={() => setMobileChat(false)} />
-    </div>
-  </main>
+  return (
+    <main className={`app ${mobileChat ? 'app--chat-open' : ''}`}>
+      <div className="connection-banner" role="status">
+        <span className={`connection-badge ${settings ? 'connection-badge--connected' : ''}`}>
+          {settings ? 'Telegram подключён' : 'Нет подключения'}
+        </span>
+        <span>{settings ? 'Отправка доступна. Входящие сообщения пока не отображаются.' : 'Подключите инстанс GREEN-API, чтобы начать переписку.'}</span>
+      </div>
+      <div className="chat-layout">
+        <aside className="sidebar" aria-label="Чаты и подключение">
+          <header className="sidebar__header">
+            <h1>Чаты</h1>
+            <div className="sidebar__actions">
+              <button ref={newChatRef} type="button" className="primary-button" disabled={!settings} onClick={() => setPanel('chat')}>
+                <Icon name="plus" />Новый чат
+              </button>
+              <button ref={settingsRef} type="button" className={`icon-button settings-button ${panel === 'connection' ? 'is-active' : ''}`}
+                aria-label="Настройки подключения" aria-expanded={panel === 'connection'}
+                onClick={() => setPanel(panel === 'connection' ? null : 'connection')}>
+                <Icon name="settings" />
+              </button>
+            </div>
+          </header>
+          <ChatList chats={chats} activeId={activeId} search={search} onSearch={setSearch}
+            onSelect={id => { setActiveId(id); setMobileChat(true) }} />
+          {panel && (
+            <SidebarForm key={`${panel}-${settings ? 'connected' : 'disconnected'}`} mode={panel} settings={settings}
+              sending={sendingId !== null} onClose={closePanel} onCreate={createChat} onConnect={connect} onDisconnect={disconnect} />
+          )}
+        </aside>
+        <ChatWindow chat={activeChat} connected={!!settings} draft={activeId ? drafts[activeId] ?? '' : ''}
+          sending={sendingId === activeId && sendingId !== null} sendBusy={sendingId !== null}
+          error={activeId ? sendErrors[activeId] ?? '' : ''}
+          onDraft={text => { if (activeId) setDrafts(current => ({ ...current, [activeId]: text })) }}
+          onSend={() => { void sendMessage() }} onBack={() => setMobileChat(false)} />
+      </div>
+    </main>
+  )
 }
 
 export default App
