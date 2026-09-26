@@ -1,0 +1,31 @@
+.welcome {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.welcome__mark {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.welcome h1 {
+  margin: 24px 0 8px;
+  font-size: 32px;
+}
+
+.welcome p {
+  margin: 0;
+  color: #657089;
+}
