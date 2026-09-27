@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { checkConnection, errorMessage, GreenApiError, resolveChat, sendText } from './api/greenApi'
 import { ChatList } from './components/ChatList'
 import { ChatWindow } from './components/ChatWindow'
 import { Icon } from './components/Icon'
 import { SidebarForm } from './components/SidebarForm'
-import type { Chat, ConnectionSettings, Message } from './types'
+import { chatsReducer, initialChatsState } from './state/chats'
+import { useNotifications } from './hooks/useNotifications'
+import type { ConnectionSettings, Message } from './types'
 import './App.css'
 
 function App() {
-  const [chats, setChats] = useState<Chat[]>([])
+  const [{ chats }, dispatch] = useReducer(chatsReducer, initialChatsState)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -21,6 +23,7 @@ function App() {
   const settingsRef = useRef<HTMLButtonElement>(null)
   const sendControllerRef = useRef<AbortController | null>(null)
   const activeChat = chats.find(chat => chat.id === activeId)
+  const receiving = useNotifications(settings, dispatch)
 
   useEffect(() => () => sendControllerRef.current?.abort(), [])
 
@@ -39,8 +42,9 @@ function App() {
 
   function disconnect() {
     if (sendControllerRef.current) return
+    receiving.stop()
     setSettings(null)
-    setChats([])
+    dispatch({ type: 'reset' })
     setDrafts({})
     setSendErrors({})
     setSearch('')
@@ -54,9 +58,7 @@ function App() {
     const existing = chats.find(chat => chat.recipient === recipient)
     const id = existing?.id ?? await resolveChat(settings, recipient, signal)
     if (signal.aborted) return
-    setChats(current => current.some(chat => chat.id === id)
-      ? current
-      : [{ id, recipient, messages: [] }, ...current])
+    dispatch({ type: 'create', chatId: id, recipient })
     setActiveId(id)
     setSearch('')
     closePanel()
@@ -81,9 +83,7 @@ function App() {
       const message: Message = {
         id, text, direction: 'outgoing', createdAt: new Date().toISOString(), status: 'queued',
       }
-      setChats(current => current.map(chat => chat.id === chatId
-        ? { ...chat, messages: [...chat.messages, message] }
-        : chat))
+      dispatch({ type: 'message', chatId, recipient: activeChat.recipient, message })
       setDrafts(current => current[chatId] === draft ? { ...current, [chatId]: '' } : current)
     } catch (error) {
       if (controller.signal.aborted) return
@@ -102,11 +102,14 @@ function App() {
 
   return (
     <main className={`app ${mobileChat ? 'app--chat-open' : ''}`}>
-      <div className="connection-banner" role="status">
+      <div className={`connection-banner ${settings && receiving.status !== 'running' ? 'connection-banner--warning' : ''}`} role="status">
         <span className={`connection-badge ${settings ? 'connection-badge--connected' : ''}`}>
-          {settings ? 'Telegram подключён' : 'Нет подключения'}
+          {settings ? (receiving.status === 'paused' ? 'Получение приостановлено' : 'Telegram подключён') : 'Нет подключения'}
         </span>
-        <span>{settings ? 'Отправка доступна. Входящие сообщения пока не отображаются.' : 'Подключите инстанс GREEN-API, чтобы начать переписку.'}</span>
+        <span>{settings ? receiving.message : 'Подключите инстанс GREEN-API, чтобы начать переписку.'}</span>
+        {settings && receiving.status === 'paused' && (
+          <button type="button" className="retry-button" onClick={receiving.retry}>Проверить снова</button>
+        )}
       </div>
       <div className="chat-layout">
         <aside className="sidebar" aria-label="Чаты и подключение">

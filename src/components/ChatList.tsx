@@ -13,9 +13,7 @@ interface Props {
 export function ChatList({ chats, activeId, search, onSearch, onSelect }: Props) {
   const query = search.trim().toLowerCase()
   const digits = /^[+\d\s()-]+$/.test(query) ? normalizePhone(query) : ''
-  const filtered = chats.filter(chat => !query || (chat.recipient.startsWith('@')
-    ? chat.recipient.toLowerCase().includes(query)
-    : digits !== '' && chat.recipient.includes(digits)))
+  const filtered = chats.filter(chat => !query || (chat.recipient.toLowerCase().includes(query) || (digits !== '' && /^\d+$/.test(chat.recipient) && chat.recipient.includes(digits))))
 
   return <>
     <label className="search-field">

@@ -1,5 +1,5 @@
 export function formatRecipient(phone: string) {
-  if (phone.startsWith('@')) return phone
+  if (!/^\d+$/.test(phone)) return phone
   if (phone.length === 11 && phone.startsWith('7')) {
     return `+7 ${phone.slice(1, 4)} ${phone.slice(4, 7)}-${phone.slice(7, 9)}-${phone.slice(9)}`
   }

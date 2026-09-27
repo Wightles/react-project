@@ -125,3 +125,7 @@ button { cursor: pointer; }
 .chat-item__top strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .conversation__header > div { min-width: 0; }
 .conversation__header h2 { overflow-wrap: anywhere; }
+.connection-banner--warning { color: #87632e; }
+.connection-banner { flex-wrap: wrap; }
+.retry-button { color: var(--blue); background: transparent; border: 0; padding: 4px 8px; text-decoration: underline; font-size: inherit; }
+.message-status--failed { color: #a32f43; }

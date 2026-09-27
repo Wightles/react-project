@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useRef } from 'react'
 import { MESSAGE_MAX_LENGTH } from '../constants'
-import type { Chat } from '../types'
+import type { Chat, MessageStatus } from '../types'
 import { formatDay, formatRecipient, formatTime } from '../utils/format'
 import { Avatar, Icon } from './Icon'
+
+const statusLabels: Record<MessageStatus, string> = { queued: 'В очереди', delivered: 'Доставлено', read: 'Прочитано', failed: 'Не доставлено' }
 
 interface Props {
   chat: Chat | undefined
@@ -57,14 +59,14 @@ export function ChatWindow({ chat, connected, draft, sending, sendBusy, error, o
           const previous = chat.messages[index - 1]
           const startsDay = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString()
           return (
-            <Fragment key={message.id}>
+            <Fragment key={`${message.direction}:${message.id}`}>
               {startsDay && <div className="day-divider"><span>{formatDay(message.createdAt)}</span></div>}
               <div className={`message-row message-row--${message.direction}`}>
                 <div className="message">
                   <span className="sr-only">{message.direction === 'outgoing' ? 'Вы: ' : 'Собеседник: '}</span>
                   <span className="message__text">{message.text}</span>
                   <span className="message__meta">
-                    {message.status === 'queued' && <span title="GREEN-API принял сообщение в очередь. Доставка ещё не подтверждена.">В очереди</span>}
+                    {message.status && <span className={message.status === 'failed' ? 'message-status--failed' : undefined}>{statusLabels[message.status]}</span>}
                     <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
                   </span>
                 </div>
@@ -74,6 +76,7 @@ export function ChatWindow({ chat, connected, draft, sending, sendBusy, error, o
         })}
         <div ref={endRef} />
       </div>
+      {chat.deliveryError && <p className="send-error" role="alert">{chat.deliveryError}</p>}
       {error && <p className="send-error" role="alert">{error} Текст сохранён в поле ввода.</p>}
       <form className="composer" aria-busy={sending} onSubmit={event => { event.preventDefault(); onSend() }}>
         <div className="composer__input">
